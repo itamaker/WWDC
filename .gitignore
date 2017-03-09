@@ -16,3 +16,5 @@ profile
 DerivedData
 .idea/
 Crashlytics.sh
+generatechangelog.sh
+Pods/

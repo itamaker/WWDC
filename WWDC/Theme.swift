@@ -16,14 +16,15 @@ class Theme: NSObject {
         return _SharedThemeInstance
     }
     
-    let separatorColor = NSColor.grayColor().colorWithAlphaComponent(0.3)
-    let backgroundColor = NSColor.whiteColor()
+    let separatorColor = NSColor.gray.withAlphaComponent(0.3)
+    let backgroundColor = NSColor.white
     let fillColor = NSColor(calibratedRed: 0, green: 0.49, blue: 1, alpha: 1)
+    let liveColor = NSColor(calibratedRed:0.823, green:0.114, blue:0.053, alpha:1)
     
-    private var cachedImages: [String:CGImage] = [:]
+    fileprivate var cachedImages: [String:CGImage] = [:]
     
-    private let starImageName = "star"
-    private let starOutlineImageName = "star-outline"
+    fileprivate let starImageName = "star"
+    fileprivate let starOutlineImageName = "star-outline"
     
     var starImage: CGImage {
         get {
@@ -36,25 +37,13 @@ class Theme: NSObject {
         }
     }
     
-    private func getImage(name: String) -> CGImage {
+    fileprivate func getImage(_ name: String) -> CGImage {
         if let image = cachedImages[name] {
             return image
         } else {
-            cachedImages[name] = NSImage(named: name)?.CGImage
+            cachedImages[name] = NSImage(named: name)?.cgImage
             return cachedImages[name]!
         }
     }
     
-}
-
-private extension NSImage {
-    var CGImage: CGImageRef {
-        get {
-            var rect = NSMakeRect(0, 0, self.size.width, self.size.height)
-            
-            var iref = self.CGImageForProposedRect(&rect, context: nil, hints: nil)
-            
-            return iref!.takeRetainedValue()
-        }
-    }
 }

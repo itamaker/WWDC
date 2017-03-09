@@ -15,49 +15,39 @@ class MainWindowController: NSWindowController {
         
         configureWindowAppearance()
         
-        NSNotificationCenter.defaultCenter().addObserverForName(NSWindowWillCloseNotification, object: nil, queue: nil) { _ in
+        NotificationCenter.default.addObserver(forName: NSNotification.Name.NSWindowWillClose, object: window, queue: nil) { _ in
             if let window = self.window {
                 Preferences.SharedPreferences().mainWindowFrame = window.frame
             }
         }
-        
-        NSNotificationCenter.defaultCenter().addObserverForName(LiveEventNextInfoChangedNotification, object: nil, queue: NSOperationQueue.mainQueue()) { _ in
-            if let liveBanner = LiveEventBannerViewController.DefaultController {
-                liveBanner.event = LiveEventObserver.SharedObserver().nextEvent
-                if let window = self.window {
-                    window.contentView.addSubview(liveBanner.view)
-                    liveBanner.prepareForParentView(window.contentView as! NSView)
-                }
-            }
-        }
     }
     
-    override func showWindow(sender: AnyObject?) {
+    override func showWindow(_ sender: Any?) {
         restoreWindowSize()
         
         super.showWindow(sender)
     }
     
-    private func configureWindowAppearance()
+    fileprivate func configureWindowAppearance()
     {
         if let window = window {
-            if let view = window.contentView as? NSView {
+            if let view = window.contentView {
                 view.wantsLayer = true
             }
             
-            window.styleMask |= NSFullSizeContentViewWindowMask
-            window.titleVisibility = .Hidden
+            window.styleMask.insert(.fullSizeContentView)
+            window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
         }
     }
     
-    private func restoreWindowSize()
+    fileprivate func restoreWindowSize()
     {
         if let window = window {
             var savedFrame = Preferences.SharedPreferences().mainWindowFrame
             
             if savedFrame != NSZeroRect {
-                if let screen = NSScreen.mainScreen() {
+                if let screen = NSScreen.main() {
                     // if the screen's height changed between launches, the window can be too big
                     if savedFrame.size.height > screen.frame.size.height {
                         savedFrame.size.height = screen.frame.size.height
@@ -67,6 +57,14 @@ class MainWindowController: NSWindowController {
                 window.setFrame(savedFrame, display: true)
             }
         }
+    }
+    
+    @IBAction func toggleSidebar(_ sender: AnyObject) {
+        guard let splitController = window?.contentViewController as? NSSplitViewController, splitController.splitViewItems.count > 0 else { return }
+        
+        let sidebar = splitController.splitViewItems[0]
+        
+        sidebar.animator().isCollapsed = !sidebar.isCollapsed
     }
 
 }

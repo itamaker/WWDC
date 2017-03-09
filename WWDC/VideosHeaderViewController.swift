@@ -10,10 +10,24 @@ import Cocoa
 
 class VideosHeaderViewController: NSViewController {
     
-    @IBOutlet weak var searchBar: NSSearchField!
-    @IBOutlet weak var searchBarBottomConstraint: NSLayoutConstraint!
+    var progress: Progress? {
+        didSet {
+            searchBar.progress = progress
+        }
+    }
+    var searchTerm: String? {
+        get {
+            return searchBar.stringValue == "" ? nil : searchBar.stringValue
+        }
+        set {
+            guard !searchBar.isFirstResponder else { return }
+            searchBar.stringValue = newValue ?? ""
+        }
+    }
+    @IBOutlet weak fileprivate var searchBar: ProgressSearchField!
+    @IBOutlet weak fileprivate var searchBarBottomConstraint: NSLayoutConstraint!
     
-    var performSearch: ((term: String) -> Void)?
+    var performSearch: ((_ term: String) -> Void)?
     
     class func loadDefaultController() -> VideosHeaderViewController? {
         return VideosHeaderViewController(nibName: "VideosHeaderViewController", bundle: nil)
@@ -22,29 +36,33 @@ class VideosHeaderViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         
-        searchBar.enabled = false
+        searchBar.isEnabled = false
     }
     
     override func viewDidAppear() {
         super.viewDidAppear()
         
-        let nc = NSNotificationCenter.defaultCenter()
+        let nc = NotificationCenter.default
         
-        nc.addObserverForName(NSWindowWillEnterFullScreenNotification, object: view.window!, queue: nil) { object in
+        nc.addObserver(forName: NSNotification.Name.NSWindowWillEnterFullScreen, object: view.window!, queue: nil) { object in
             self.searchBarBottomConstraint.constant = 19
         }
-        nc.addObserverForName(NSWindowWillExitFullScreenNotification, object: view.window!, queue: nil) { object in
+        nc.addObserver(forName: NSNotification.Name.NSWindowWillExitFullScreen, object: view.window!, queue: nil) { object in
             self.searchBarBottomConstraint.constant = 12
         }
     }
     
     func enable() {
-        searchBar.enabled = true
+        searchBar.isEnabled = true
     }
     
-    @IBAction func search(sender: NSSearchField) {
+    @IBAction func search(_ sender: NSSearchField) {
         if let callback = performSearch {
-            callback(term: sender.stringValue)
+            callback(sender.stringValue)
         }
+    }
+    
+    @IBAction func activateSearchField(_ sender: AnyObject) {
+        searchBar.window?.makeFirstResponder(searchBar)
     }
 }

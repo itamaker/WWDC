@@ -13,21 +13,23 @@ class PDFWindowController: NSWindowController {
 
     @IBOutlet weak var pdfView: PDFView!
     
-    @IBOutlet weak var progressIndicator: NSProgressIndicator! {
-        didSet {
-            progressIndicator.displayedWhenStopped = false
-        }
-    }
+    @IBOutlet weak var progressBgView: ContentBackgroundView!
+    @IBOutlet weak var progressIndicator: NSProgressIndicator!
+    
+    fileprivate var titlebarAccessoryController: TitlebarButtonAccessory!
+    
     var session: Session!
     var slidesDocument: PDFDocument? {
         didSet {
-            if slidesDocument != nil {
-                pdfView.setDocument(slidesDocument)
-                progressIndicator.stopAnimation(nil)
-                if let bgView = progressIndicator.superview {
-                    bgView.hidden = true
-                }
-            }
+            guard slidesDocument != nil else { return }
+            
+            window?.titlebarAppearsTransparent = false
+            window?.isMovableByWindowBackground = false
+            pdfView.document = slidesDocument
+            progressIndicator.stopAnimation(nil)
+            pdfView.isHidden = false
+            progressBgView.isHidden = true
+            titlebarAccessoryController.view.isHidden = false
         }
     }
     
@@ -36,38 +38,87 @@ class PDFWindowController: NSWindowController {
         self.session = session
     }
     
+    var downloader: SlidesDownloader!
     override func windowDidLoad() {
         super.windowDidLoad()
         
+        titlebarAccessoryController = TitlebarButtonAccessory(buttonTitle: "Open in Preview", buttonAction: openInPreview)
+        
+        window?.titlebarAppearsTransparent = true
+        window?.isMovableByWindowBackground = true
+        
+        titlebarAccessoryController.layoutAttribute = .right
+        window?.addTitlebarAccessoryViewController(titlebarAccessoryController)
+        titlebarAccessoryController.view.isHidden = true
+        
         progressIndicator.startAnimation(nil)
         
-        if session != nil {
-            window?.title = "WWDC \(session.year) | \(session.title) | Slides"
+        guard session != nil else { return }
+        
+        window?.title = "WWDC \(session.year) | \(session.title) | Slides"
 
-            DataStore.SharedStore.downloadSessionSlides(session) { success, data in
-                dispatch_async(dispatch_get_main_queue()) {
-                    if success == true {
-                        self.slidesDocument = PDFDocument(data: data)
-                    } else {
-                        println("Download failed")
-                    }
+        downloader = SlidesDownloader(session: session)
+        if session.slidesPDFData.count > 0 {
+            self.slidesDocument = PDFDocument(data: session.slidesPDFData as Data)
+        } else {
+            let progressHandler: SlidesDownloader.ProgressHandler = { downloaded, total in
+                if self.progressIndicator.isIndeterminate {
+                    self.progressIndicator.minValue = 0
+                    self.progressIndicator.maxValue = total
+                    self.progressIndicator.isIndeterminate = false
                 }
+                
+                self.progressIndicator.doubleValue = downloaded
             }
+            downloader.downloadSlides({ success, data in
+                if success == true {
+                    guard let data = data else { return }
+                    
+                    self.slidesDocument = PDFDocument(data: data)
+                } else {
+                    print("Download failed")
+                }
+            }, progressHandler: progressHandler)
         }
     }
     
-    func saveDocument(sender: AnyObject?) {
+    fileprivate func openInPreview() {
+        guard let slidesDocument = slidesDocument else { return }
+        guard let downloadsPath = NSSearchPathForDirectoriesInDomains(.downloadsDirectory, .userDomainMask, true).first else { return }
+        
+        let filePath = NSString.path(withComponents: [downloadsPath, "\(session.title).pdf"])
+        
+        if slidesDocument.write(to: URL(fileURLWithPath: filePath)) {
+            NSWorkspace.shared().openFile(filePath)
+        } else {
+            NSLog("Error writing slides document to file \(filePath)")
+        }
+    }
+    
+    func saveDocument(_ sender: AnyObject?) {
         let panel = NSSavePanel()
         panel.allowedFileTypes = ["pdf"]
         panel.nameFieldStringValue = session!.title
         
-        panel.beginSheetModalForWindow(window!){ result in
+        panel.beginSheetModal(for: window!){ result in
             if result != 1 {
                 return
             }
             
-            self.slidesDocument?.writeToURL(panel.URL)
+            self.slidesDocument?.write(to: panel.url!)
         }
     }
     
+    override func keyDown(theEvent: NSEvent) {
+        switch theEvent.keyCode {
+        case 35: // p
+            pdfView.goToPreviousPage(self)
+        case 45: // n
+            pdfView.goToNextPage(self)
+        default:
+            super.keyDown(theEvent)
+            break
+        }
+    }
+
 }

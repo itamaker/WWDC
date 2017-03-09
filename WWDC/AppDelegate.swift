@@ -8,30 +8,32 @@
 
 import Cocoa
 import Crashlytics
-import Updater
+import Sparkle
 
 @NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     var window: NSWindow?
 	
-    private var downloadListWindowController: DownloadListWindowController?
-    private var preferencesWindowController: PreferencesWindowController?
+    fileprivate var downloadListWindowController: DownloadListWindowController?
+    fileprivate var preferencesWindowController: PreferencesWindowController?
     
-    func applicationOpenUntitledFile(sender: NSApplication) -> Bool {
+    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
         window?.makeKeyAndOrderFront(nil)
         return false
     }
 
-    func applicationDidFinishLaunching(aNotification: NSNotification) {
+    func applicationDidFinishLaunching(_ aNotification: Notification) {
+        UserDefaults.standard.register(defaults: ["NSApplicationCrashOnExceptions": true])
+        
+        // prefetch info for the about window
+        About.sharedInstance.load()
+        
         // start checking for live event
         LiveEventObserver.SharedObserver().start()
         
-        // check for updates
-        checkForUpdates(nil)
-        
         // Keep a reference to the main application window
-        window = NSApplication.sharedApplication().windows.last as! NSWindow?
+        window = NSApplication.shared().windows.last 
         
         // continue any paused downloads
         VideoStore.SharedStore().initialize()
@@ -39,50 +41,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // initialize Crashlytics
         GRCrashlyticsHelper.install()
         
-        // tell the user he can watch the live keynote using the app, only once
-        if !Preferences.SharedPreferences().userKnowsLiveEventThing {
-            tellUserAboutTheLiveEventThing()
-        }
+        // tell user about nice new things
+        showCourtesyDialogs()
     }
     
-    func applicationWillFinishLaunching(notification: NSNotification) {
+    func applicationWillFinishLaunching(_ notification: Notification) {
         // register custom URL scheme handler
         URLSchemeHandler.SharedHandler().register()
     }
 
-    func applicationWillTerminate(aNotification: NSNotification) {
+    func applicationWillTerminate(_ aNotification: Notification) {
         // Insert code here to tear down your application
     }
-	
-    @IBAction func checkForUpdates(sender: AnyObject?) {
-        UDUpdater.sharedUpdater().updateAutomatically = true
-        UDUpdater.sharedUpdater().checkForUpdatesWithCompletionHandler { newRelease in
-            if newRelease != nil {
-                if sender != nil {
-                    let alert = NSAlert()
-                    alert.messageText = "New version available"
-                    alert.informativeText = "Version \(newRelease.version) is now available. It will be installed automatically the next time you launch the app."
-                    alert.addButtonWithTitle("Ok")
-                    alert.runModal()
-                } else {
-                    let notification = NSUserNotification()
-                    notification.title = "New version available"
-                    notification.informativeText = "A new version is available, relaunch the app to update"
-                    NSUserNotificationCenter.defaultUserNotificationCenter().deliverNotification(notification)
-                }
-            } else {
-                if sender != nil {
-                    let alert = NSAlert()
-                    alert.messageText = "You're up to date!"
-                    alert.informativeText = "You have the newest version"
-                    alert.addButtonWithTitle("Ok")
-                    alert.runModal()
-                }
-            }
-        }
+    
+    @IBAction func checkForUpdates(_ sender: AnyObject?) {
+        SUUpdater.shared().checkForUpdates(sender)
     }
     
-    @IBAction func showDownloadsWindow(sender: AnyObject?) {
+    @IBAction func showDownloadsWindow(_ sender: AnyObject?) {
         if downloadListWindowController == nil {
             downloadListWindowController = DownloadListWindowController()
         }
@@ -90,7 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         downloadListWindowController?.showWindow(self)
     }
     
-    @IBAction func showPreferencesWindow(sender: AnyObject?) {
+    @IBAction func showPreferencesWindow(_ sender: AnyObject?) {
         if preferencesWindowController == nil {
             preferencesWindowController = PreferencesWindowController()
         }
@@ -98,14 +74,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         preferencesWindowController?.showWindow(self)
     }
     
-    private func tellUserAboutTheLiveEventThing() {
-        let alert = NSAlert()
-        alert.messageText = "Did you know?"
-        alert.informativeText = "You can watch live WWDC events using this app! Just open the app while the event is live and It will start playing automatically."
-        alert.addButtonWithTitle("Got It!")
-        alert.runModal()
+    // MARK: - Courtesy Dialogs
+    
+    fileprivate func showCourtesyDialogs() {
+        NotificationCenter.default.addObserver(self, selector: #selector(WWDCWeekDidStart), name: NSNotification.Name(rawValue: WWDCWeekDidStartNotification), object: nil)
         
-        Preferences.SharedPreferences().userKnowsLiveEventThing = true
+        NewWWDCGreeter().presentAutomaticRefreshSuggestionIfAppropriate()
+    }
+    
+    @objc fileprivate func WWDCWeekDidStart() {
+        NewWWDCGreeter().presentAutomaticRefreshSuggestionIfAppropriate()
+    }
+    
+    // MARK: - About Panel
+    
+    fileprivate lazy var aboutWindowController: AboutWindowController = {
+        var aboutWC = AboutWindowController(infoText: About.sharedInstance.infoText)
+        
+        About.sharedInstance.infoTextChangedCallback = { newText in
+            self.aboutWindowController.infoText = newText
+        }
+        
+        return aboutWC
+    }()
+    
+    @IBAction func showAboutWindow(_ sender: AnyObject?) {
+        aboutWindowController.showWindow(sender)
     }
 
 }

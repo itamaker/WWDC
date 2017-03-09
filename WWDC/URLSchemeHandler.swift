@@ -17,50 +17,40 @@ class URLSchemeHandler: NSObject {
     }
     
     func register() {
-        NSAppleEventManager.sharedAppleEventManager().setEventHandler(self, andSelector: "handleURLEvent:replyEvent:", forEventClass: UInt32(kInternetEventClass), andEventID: UInt32(kAEGetURL))
+        NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(URLSchemeHandler.handleURLEvent(_:replyEvent:)), forEventClass: UInt32(kInternetEventClass), andEventID: UInt32(kAEGetURL))
     }
     
-    func handleURLEvent(event: NSAppleEventDescriptor, replyEvent: NSAppleEventDescriptor) {
-        if let urlString = event.paramDescriptorForKeyword(UInt32(keyDirectObject))?.stringValue {
-            if let url = NSURL(string: urlString) {
+    func handleURLEvent(_ event: NSAppleEventDescriptor, replyEvent: NSAppleEventDescriptor) {
+        if let urlString = event.paramDescriptor(forKeyword: UInt32(keyDirectObject))?.stringValue {
+            if let url = URL(string: urlString) {
                 if let host = url.host {
-                    if let path = url.path {
-                        findAndOpenSession(host,path.stringByReplacingOccurrencesOfString("/", withString: "", options: .CaseInsensitiveSearch, range: nil))
-                    }
+                    findAndOpenSession(host,url.path.replacingOccurrences(of: "/", with: "", options: .caseInsensitive, range: nil))
                 }
             }
         }
     }
     
-    private func findAndOpenSession(year: String, _ id: String) {
-        if let sessions = DataStore.SharedStore.cachedSessions {
-            println("Year: \(year) | id: \(id)")
-            let foundSession = sessions.filter { session in
-                if session.year == year.toInt()! && session.id == id.toInt()! {
-                    return true
-                } else {
-                    return false
-                }
+    fileprivate func findAndOpenSession(_ year: String, _ id: String) {
+        let sessionKey = "#\(year)-\(id)"
+        guard let session = WWDCDatabase.sharedDatabase.realm.object(ofType: Session.self, forPrimaryKey: sessionKey as AnyObject) else { return }
+        
+        // session has HD video
+        if let url = session.hd_url {
+            if VideoStore.SharedStore().hasVideo(url) {
+                // HD video is available locally
+                let url = VideoStore.SharedStore().localVideoAbsoluteURLString(url)
+                launchVideo(session, url: url)
+            } else {
+                // HD video is not available locally
+                launchVideo(session, url: url)
             }
-            
-            if foundSession.count > 0 {
-                let session = foundSession[0]
-
-                if let url = session.hd_url {
-                    if VideoStore.SharedStore().hasVideo(url) {
-                        let url = VideoStore.SharedStore().localVideoAbsoluteURLString(url)
-                        launchVideo(session, url: url)
-                    } else {
-                        launchVideo(session, url: url)
-                    }
-                } else {
-                    launchVideo(session, url: session.url)
-                }
-            }
+        } else {
+            // session has only SD video
+            launchVideo(session, url: session.videoURL)
         }
     }
     
-    private func launchVideo(session: Session, url: String) {
+    fileprivate func launchVideo(_ session: Session, url: String) {
         let controller = VideoWindowController(session: session, videoURL: url)
         controller.showWindow(self)
     }

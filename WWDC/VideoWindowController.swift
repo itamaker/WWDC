@@ -9,20 +9,20 @@
 import Cocoa
 import AVFoundation
 import AVKit
-import ASCIIwwdc
-import ViewUtils
+import WWDCAppKit
+import KVOController
 
 private let _nibName = "VideoWindowController"
 
 class VideoWindowController: NSWindowController {
-
+    
     var session: Session?
-    var event: LiveEvent?
     
     var videoURL: String?
+    var startTime: Double?
     
-    var asset: AVAsset!
-    var item: AVPlayerItem!
+    weak var asset: AVAsset!
+    weak var item: AVPlayerItem!
     
     var transcriptWC: TranscriptWindowController!
     var playerWindow: GRPlayerWindow {
@@ -30,159 +30,188 @@ class VideoWindowController: NSWindowController {
             return window as! GRPlayerWindow
         }
     }
-    var videoNaturalSize = CGSizeZero
-
+    var videoNaturalSize = CGSize.zero
+    
     convenience init(session: Session, videoURL: String) {
         self.init(windowNibName: _nibName)
         self.session = session
         self.videoURL = videoURL
     }
     
-    convenience init(event: LiveEvent, videoURL: String) {
+    convenience init(session: Session, videoURL: String, startTime: Double?) {
         self.init(windowNibName: _nibName)
-        self.event = event
+        self.session = session
         self.videoURL = videoURL
-        NSNotificationCenter.defaultCenter().addObserverForName(LiveEventTitleAvailableNotification, object: nil, queue: NSOperationQueue.mainQueue()) { note in
-            if let title = note.object as? String {
-                self.window?.title = "\(title) (Live)"
-            }
-        }
+        self.startTime = startTime
     }
     
-    @IBOutlet weak var customPlayerView: GRCustomPlayerView!
     @IBOutlet weak var playerView: AVPlayerView!
     @IBOutlet weak var progressIndicator: NSProgressIndicator!
-    var player: AVPlayer? {
+    
+    weak var player: AVPlayer? {
         didSet {
             if let player = player {
-                if let args = NSProcessInfo.processInfo().arguments as? [String] {
-                    if args.contains("zerovolume") {
-                        player.volume = 0
-                    }
+                if #available(OSX 10.11, *) {
+                    player.allowsExternalPlayback = true
+                }
+                
+                let args = ProcessInfo.processInfo.arguments
+                if args.contains("zerovolume") {
+                    player.volume = 0
                 }
             }
         }
     }
+    
+    fileprivate var activity: NSObjectProtocol?
     
     override func windowDidLoad() {
         super.windowDidLoad()
-
+        
+        guard let session = session else { return }
+        
+        setupPlayer()
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(NSWindowDelegate.windowWillClose(_:)), name: NSNotification.Name.NSWindowWillClose, object: self.window)
+        
+        activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .idleSystemSleepDisabled, .userInitiated], reason: "Playing WWDC session video")
+        
         progressIndicator.startAnimation(nil)
-        window?.backgroundColor = NSColor.blackColor()
-
-        if let url = NSURL(string: videoURL!) {
-            if event == nil {
-                player = AVPlayer(URL: url)
-                playerView.player = player
+        window?.backgroundColor = NSColor.black
+        
+        window?.title = "\(session.event) \(session.year) | \(session.title)"
+        
+        // pause playback when a live event starts playing
+        NotificationCenter.default.addObserver(forName: NSNotification.Name(rawValue: LiveEventWillStartPlayingNotification), object: nil, queue: nil) { [weak self] _ in
+            self?.player?.pause()
+        }
+        
+        if Preferences.SharedPreferences().floatOnTopEnabled {
+            window!.level = Int(CGWindowLevelForKey(CGWindowLevelKey.floatingWindow))
+        }
+    }
+    
+    func windowWillClose(_ note: Notification!) {
+        NotificationCenter.default.removeObserver(self)
+        
+        if let player = player {
+            player.cancelPendingPrerolls()
+            player.pause()
+            if #available(OSX 10.11, *) {
+                removeRateObserver(player: player)
+            }
+        }
+        
+        asset = nil
+        item = nil
+        player = nil
+        
+        if let observer: AnyObject = timeObserver {
+            player?.removeTimeObserver(observer)
+        }
+        if let observer: AnyObject = boundaryObserver {
+            player?.removeTimeObserver(observer)
+        }
+        
+        if let activity = self.activity {
+            ProcessInfo.processInfo.endActivity(activity)
+        }
+        
+        self.transcriptWC?.close()
+        self.transcriptWC = nil
+    }
+    
+    fileprivate func setupPlayer() {
+        guard let videoURL = videoURL, let url = URL(string: videoURL) else { return }
+        
+        playerView.controlsStyle = .none
+        
+        player = AVPlayer(url: url)
+        if #available(OSX 10.11, *) {
+            addRateObserver(player: player!)
+        }
+        playerView.player = player
+        
+        kvoController.observe(player, keyPath: #keyPath(AVPlayer.currentItem.presentationSize), options: [.initial, .new], action: #selector(setupWindowSizing))
+        
+        player?.currentItem?.asset.loadValuesAsynchronously(forKeys: ["tracks"]) { [weak self] in
+            DispatchQueue.main.async {
+                self?.setupTimeObserver()
                 
-                // SESSION
-                player?.currentItem.asset.loadValuesAsynchronouslyForKeys(["tracks"]) {
-                    dispatch_async(dispatch_get_main_queue()) {
-                        self.setupWindowSizing()
-                        self.setupTimeObserver()
-                        
-                        if let session = self.session {
-                            if session.currentPosition > 0 {
-                                self.player?.seekToTime(CMTimeMakeWithSeconds(session.currentPosition, 1))
-                            }
-                        }
-                        
-                        self.player?.play()
-                        self.progressIndicator.stopAnimation(nil)
+                if let session = self?.session {
+                    if session.currentPosition > 0 {
+                        self?.player?.seek(to: CMTimeMakeWithSeconds(session.currentPosition, 1))
                     }
                 }
-            }
-        }
-        
-        if let session = self.session {
-            window?.title = "WWDC \(session.year) | \(session.title)"
-            
-            // pause playback when a live event starts playing
-            NSNotificationCenter.defaultCenter().addObserverForName(LiveEventWillStartPlayingNotification, object: nil, queue: nil) { _ in
-                self.player?.pause()
-            }
-        }
-        
-        if let event = self.event {
-            window?.title = "\(event.title) (Live)"
-            
-            loadEventVideo()
-        }
-        
-        NSNotificationCenter.defaultCenter().addObserverForName(NSWindowWillCloseNotification, object: self.window, queue: nil) { _ in
-            if self.event != nil {
-                if self.item != nil {
-                    self.item.removeObserver(self, forKeyPath: "status")
+                
+                if let startAt = self?.startTime {
+                    self?.seekTo(startAt)
                 }
-            }
-            
-            self.transcriptWC?.close()
-            
-            self.player?.pause()
-        }
-    }
-    
-    private func loadEventVideo() {
-        if let url = event!.appropriateURL {
-            
-            println("LIVE EVENT URL: \(url)")
-            
-            if let asset = AVURLAsset(URL: url, options: nil) {
-                self.asset = asset
-                let keys = ["playable", "tracks"]
-                asset.loadValuesAsynchronouslyForKeys(keys) {
-                    for key in keys {
-                        var error: NSError?
-                        let status = asset.statusOfValueForKey(key, error: &error)
-                        if status == .Failed {
-                            println("[Live Session Playback] Failed to load status for key \(key) \(error)")
-                            return
-                        }
-                    }
-                    
-                    dispatch_async(dispatch_get_main_queue()) {
-                        self.playEventVideo()
-                    }
-                }
+                self?.player?.play()
+                self?.progressIndicator.stopAnimation(nil)
+                self?.playerView.controlsStyle = .floating
             }
         }
     }
     
-    private func playEventVideo() {
-        if let playerItem = AVPlayerItem(asset: self.asset) {
-            self.item = playerItem
-            self.player = AVPlayer(playerItem: self.item)
-            self.item.addObserver(self, forKeyPath: "status", options: .Initial | .New, context: nil)
-            
-            if NSProcessInfo.processInfo().isElCapitan {
-                self.playerView.hidden = true
-                self.customPlayerView.hidden = false
-                self.customPlayerView.player = self.player
-            } else {
-                self.playerView.player = player
-            }
-        }
+    var rate: Float = 1.0
+    
+    // observing the key "rate" on AVPlayer caused a crash on 10.10
+    @available(OSX 10.11, *)
+    fileprivate func addRateObserver(player: AVPlayer) {
+        player.addObserver(self, forKeyPath: "rate", options: [.new, .old], context: nil)
     }
     
-    override func observeValueForKeyPath(keyPath: String, ofObject object: AnyObject, change: [NSObject : AnyObject], context: UnsafeMutablePointer<Void>) {
+    // observing the key "rate" on AVPlayer caused a crash on 10.10
+    @available(OSX 10.11, *)
+    fileprivate func removeRateObserver(player: AVPlayer) {
+        player.removeObserver(self, forKeyPath: "rate")
+    }
+    
+    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
         if keyPath == "status" {
-            if item.status == .ReadyToPlay {
-                dispatch_async(dispatch_get_main_queue()) {
+            if item.status == .readyToPlay {
+                DispatchQueue.main.async {
                     self.progressIndicator.stopAnimation(nil)
                     self.player?.play()
                 }
             }
+        } else if keyPath == "rate" {
+            if let change = change,
+                let newRate = change[NSKeyValueChangeKey.newKey] as? Float,
+                let oldRate = change[NSKeyValueChangeKey.oldKey] as? Float
+            {
+                if oldRate == 0.0 && newRate == 1.0 { // play button tapped
+                    player!.rate = rate // set rate to stored one
+                } else if newRate != 0.0 { // change rate button tapped
+                    rate = newRate // store rate
+                }
+            }
         } else {
-            super.observeValueForKeyPath(keyPath, ofObject: object, change: change, context: context)
+            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
         }
     }
     
-    func toggleFullScreen(sender: AnyObject?) {
+    func seekTo(_ time: Double) {
+        player?.seek(to: CMTimeMakeWithSeconds(time, 6000), toleranceBefore: kCMTimeZero, toleranceAfter: kCMTimeZero)
+    }
+    
+    func toggleFullScreen(_ sender: AnyObject?) {
         window!.toggleFullScreen(sender)
     }
     
-    func showTranscriptWindow(sender: AnyObject?) {
-        if session == nil {
+    func showTranscriptWindow(_ sender: AnyObject?) {
+        guard let session = session else { return }
+        guard session.transcript != nil else {
+            let alert = NSAlert()
+            alert.messageText = "Transcript not available"
+            if WWDCEnvironment.yearsToIgnoreTranscript.contains(session.year) {
+                alert.informativeText = "Transcripts for \(session.year) sessions are not available yet."
+            } else {
+                alert.informativeText = "The transcript for this session is not available."
+            }
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
             return
         }
         
@@ -194,70 +223,68 @@ class VideoWindowController: NSWindowController {
             return
         }
         
-        if let session = session {
-            transcriptWC = TranscriptWindowController(session: session)
-            transcriptWC.showWindow(sender)
-            transcriptWC.jumpToTimeCallback = { [unowned self] time in
-                if let player = self.player {
-                    player.seekToTime(CMTimeMakeWithSeconds(time, 30))
-                }
-            }
-            transcriptWC.transcriptReadyCallback = { [unowned self] transcript in
-                self.setupTranscriptSync(transcript)
-            }
+        transcriptWC = TranscriptWindowController(session: session)
+        transcriptWC.showWindow(sender)
+        transcriptWC.jumpToTimeCallback = { [unowned self] time in
+            guard let player = self.player else { return }
+            player.seek(to: CMTimeMakeWithSeconds(time, player.currentItem!.duration.timescale))
         }
+        
+        setupTranscriptSync(session.transcript!)
     }
     
     var timeObserver: AnyObject?
     
     func setupTimeObserver() {
-        if session == nil {
-            return
-        }
+        guard session != nil && timeObserver == nil else { return }
         
-        timeObserver = player?.addPeriodicTimeObserverForInterval(CMTimeMakeWithSeconds(5, 1), queue: dispatch_get_main_queue()) { [unowned self] currentTime in
-            let progress = Double(CMTimeGetSeconds(currentTime)/CMTimeGetSeconds(self.player!.currentItem.duration))
-
-            self.session!.progress = progress
-            self.session!.currentPosition = CMTimeGetSeconds(currentTime)
-        }
+        timeObserver = player?.addPeriodicTimeObserver(forInterval: CMTimeMakeWithSeconds(5, 1), queue: DispatchQueue.main) { [weak self] currentTime in
+            guard let weakSelf = self else { return }
+            
+            let progress = Double(CMTimeGetSeconds(currentTime)/CMTimeGetSeconds(weakSelf.player!.currentItem!.duration))
+            
+            WWDCDatabase.sharedDatabase.doChanges {
+                weakSelf.session!.progress = progress
+                weakSelf.session!.currentPosition = CMTimeGetSeconds(currentTime)
+            }
+        } as AnyObject?
     }
     
     var boundaryObserver: AnyObject?
     
-    func setupTranscriptSync(transcript: WWDCSessionTranscript) {
-        if self.transcriptWC == nil {
-            return
-        }
+    func setupTranscriptSync(_ transcript: Transcript) {
+        guard !transcript.isInvalidated else { return }
+        guard transcript.lines.count > 0 else { return }
+        guard let player = player, transcriptWC != nil else { return }
+        guard let playerItem = player.currentItem else { return }
         
-        boundaryObserver = player?.addBoundaryTimeObserverForTimes(transcript.timecodes, queue: dispatch_get_main_queue()) { [unowned self] in
-            if self.transcriptWC == nil {
-                return
-            }
+        let timecodes = transcript.timecodesWithTimescale(playerItem.duration.timescale)
+        guard timecodes.count > 0 else { return }
+        
+        boundaryObserver = player.addBoundaryTimeObserver(forTimes: timecodes, queue: DispatchQueue.main) { [unowned self] in
+            guard self.transcriptWC != nil else { return }
             
-            let roundedTimecode = WWDCTranscriptLine.roundedStringFromTimecode(CMTimeGetSeconds(self.player!.currentTime()))
+            let ct = CMTimeGetSeconds(self.player!.currentTime())
+            let roundedTimecode = Transcript.roundedStringFromTimecode(ct)
             self.transcriptWC.highlightLineAt(roundedTimecode)
-        }
+        } as AnyObject?
     }
+    
+    private var aspectRatioSet = false
     
     func setupWindowSizing()
     {
-        if let asset = player?.currentItem?.asset {
-            // get video dimensions and set window aspect ratio
-            if let tracks = asset.tracksWithMediaType(AVMediaTypeVideo) as? [AVAssetTrack] {
-                if tracks.count > 0 {
-                    let track = tracks[0]
-                    videoNaturalSize = track.naturalSize
-                    playerWindow.aspectRatio = videoNaturalSize
-                } else {
-                    return
-                }
-            } else {
-                return
-            }
-        } else {
-            return
-        }
+        guard !aspectRatioSet else { return }
+        
+        guard let presentationSize = player?.currentItem?.presentationSize else { return }
+        
+        guard presentationSize.width > 0 && presentationSize.height > 0 else { return }
+        
+        videoNaturalSize = presentationSize
+        
+        playerWindow.aspectRatio = videoNaturalSize
+        
+        aspectRatioSet = true
         
         // get saved scale
         let lastScale = Preferences.SharedPreferences().lastVideoWindowScale
@@ -271,69 +298,71 @@ class VideoWindowController: NSWindowController {
         }
     }
     
-    // resizes the window so the video fills the entire screen without cropping
-    @IBAction func sizeWindowToFill(sender: AnyObject?)
-    {
-        if (videoNaturalSize == CGSizeZero) {
-            return
+    // Toggles if the window should float on top of all other windows
+    @IBAction func floatOnTop(_ sender: NSMenuItem) {
+        if sender.state == NSOnState {
+            window!.level = Int(CGWindowLevelForKey(CGWindowLevelKey.normalWindow))
+            Preferences.SharedPreferences().floatOnTopEnabled = false
+            
+            sender.state = NSOffState
+        } else {
+            window!.level = Int(CGWindowLevelForKey(CGWindowLevelKey.floatingWindow))
+            Preferences.SharedPreferences().floatOnTopEnabled = true
+            
+            sender.state = NSOnState
         }
+    }
+    
+    // resizes the window so the video fills the entire screen without cropping
+    @IBAction func sizeWindowToFill(_ sender: AnyObject?)
+    {
+        guard aspectRatioSet else { return }
         
         Preferences.SharedPreferences().lastVideoWindowScale = 100.0
         
-        playerWindow.sizeToFitVideoSize(videoNaturalSize, ignoringScreenSize: false, animated: false)
+        playerWindow.size(toFitVideoSize: videoNaturalSize, ignoringScreenSize: false, animated: false)
     }
     
     // resizes the window to a fraction of the video's size
-    func sizeWindowTo(fraction: CGFloat)
+    func sizeWindowTo(_ fraction: CGFloat)
     {
-        if (videoNaturalSize == CGSizeZero) {
-            return
-        }
+        guard aspectRatioSet else { return }
         
         Preferences.SharedPreferences().lastVideoWindowScale = fraction
         
         let scaledSize = CGSize(width: videoNaturalSize.width*fraction, height: videoNaturalSize.height*fraction)
-        playerWindow.sizeToFitVideoSize(scaledSize, ignoringScreenSize: true, animated: true)
+        playerWindow.size(toFitVideoSize: scaledSize, ignoringScreenSize: true, animated: true)
     }
     
-    @IBAction func sizeWindowToHalfSize(sender: AnyObject?) {
+    @IBAction func sizeWindowToHalfSize(_ sender: AnyObject?) {
         sizeWindowTo(0.5)
     }
     
-    @IBAction func sizeWindowToQuarterSize(sender: AnyObject?) {
+    @IBAction func sizeWindowToQuarterSize(_ sender: AnyObject?) {
         sizeWindowTo(0.25)
     }
     
-    deinit {
-        NSNotificationCenter.defaultCenter().removeObserver(self)
+}
+
+extension Transcript {
+    
+    func timecodesWithTimescale(_ timescale: Int32) -> [NSValue] {
+        var results: [NSValue] = []
         
-        if let observer: AnyObject = timeObserver {
-            player?.removeTimeObserver(observer)
+        for line in lines {
+            let time = CMTimeMakeWithSeconds(line.timecode, timescale)
+            
+            results.append(NSValue(time: time))
         }
-        if let observer: AnyObject = boundaryObserver {
-            player?.removeTimeObserver(observer)
-        }
+        
+        return results
     }
     
-}
-
-private extension NSProcessInfo {
-    var isElCapitan: Bool {
-        get {
-            let v = self.operatingSystemVersion
-            return (v.majorVersion == 10 && v.minorVersion >= 11)
-        }
+    class func roundedStringFromTimecode(_ timecode: Float64) -> String {
+        let formatter = NumberFormatter()
+        formatter.positiveFormat = "0.#"
+        
+        return formatter.string(from: NSNumber(value: timecode)) ?? "0.0"
     }
-}
-
-private extension LiveEvent {
-    var appropriateURL: NSURL? {
-        get {
-            if NSProcessInfo.processInfo().isElCapitan && stream2 != nil {
-                return stream2
-            } else {
-                return stream
-            }
-        }
-    }
+    
 }
