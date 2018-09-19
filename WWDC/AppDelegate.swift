@@ -2,105 +2,112 @@
 //  AppDelegate.swift
 //  WWDC
 //
-//  Created by Guilherme Rambo on 18/04/15.
-//  Copyright (c) 2015 Guilherme Rambo. All rights reserved.
+//  Created by Guilherme Rambo on 05/02/17.
+//  Copyright © 2017 Guilherme Rambo. All rights reserved.
 //
 
 import Cocoa
-import Crashlytics
 import Sparkle
 
-@NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate {
 
-    var window: NSWindow?
-	
-    fileprivate var downloadListWindowController: DownloadListWindowController?
-    fileprivate var preferencesWindowController: PreferencesWindowController?
-    
-    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
-        window?.makeKeyAndOrderFront(nil)
+    let coordinator = AppCoordinator(windowController: MainWindowController())
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(self, andSelector: #selector(handleURLEvent(_:replyEvent:)), forEventClass: UInt32(kInternetEventClass), andEventID: UInt32(kAEGetURL))
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: ["NSApplicationCrashOnExceptions": true])
+
+        LoggingHelper.install()
+
+        NSApp.registerForRemoteNotifications(matching: [])
+    }
+
+    func application(_ application: NSApplication, didReceiveRemoteNotification userInfo: [String: Any]) {
+        coordinator.receiveNotification(with: userInfo)
+    }
+
+    @objc func handleURLEvent(_ event: NSAppleEventDescriptor?, replyEvent: NSAppleEventDescriptor?) {
+        guard let event = event else { return }
+        guard let urlString = event.paramDescriptor(forKeyword: UInt32(keyDirectObject))?.stringValue else { return }
+        guard let url = URL(string: urlString) else { return }
+        guard let link = DeepLink(url: url) else { return }
+
+        coordinator.handle(link: link, deferIfNeeded: true)
+    }
+
+    @IBAction func showPreferences(_ sender: Any) {
+        coordinator.showPreferences(sender)
+    }
+
+    @IBAction func reload(_ sender: Any) {
+        coordinator.refresh(sender)
+    }
+
+    @IBAction func showAboutWindow(_ sender: Any) {
+        coordinator.showAboutWindow()
+    }
+
+    #if !FEATURED_TAB_ENABLED
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(viewFeatured) {
+            let postFix = " (Coming Soon)"
+            !menuItem.title.contains(postFix) ? menuItem.title.append(postFix) : ()
+            return false
+        } else {
+            return true
+        }
+    }
+    #endif
+
+    @IBAction func viewFeatured(_ sender: Any) {
+        coordinator.showFeatured()
+    }
+
+    @IBAction func viewSchedule(_ sender: Any) {
+        coordinator.showSchedule()
+    }
+
+    @IBAction func viewVideos(_ sender: Any) {
+        coordinator.showVideos()
+    }
+
+    @IBAction func viewHelp(_ sender: Any) {
+        if let helpUrl = URL(string: "https://github.com/insidegui/WWDC/issues") {
+            NSWorkspace.shared.open(helpUrl)
+        }
+    }
+
+    func applicationWillBecomeActive(_ notification: Notification) {
+
+        // Switches to app via application switcher
+        if !NSApp.windows.contains(where: { $0.isVisible }) {
+            coordinator.windowController.showWindow(self)
+        }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+
+        // User clicks dock item, double clicks app in finder, etc
+        if !flag {
+            coordinator.windowController.showWindow(sender)
+
+            return true
+        }
+
         return false
     }
-
-    func applicationDidFinishLaunching(_ aNotification: Notification) {
-        UserDefaults.standard.register(defaults: ["NSApplicationCrashOnExceptions": true])
-        
-        // prefetch info for the about window
-        About.sharedInstance.load()
-        
-        // start checking for live event
-        LiveEventObserver.SharedObserver().start()
-        
-        // Keep a reference to the main application window
-        window = NSApplication.shared().windows.last 
-        
-        // continue any paused downloads
-        VideoStore.SharedStore().initialize()
-        
-        // initialize Crashlytics
-        GRCrashlyticsHelper.install()
-        
-        // tell user about nice new things
-        showCourtesyDialogs()
-    }
-    
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        // register custom URL scheme handler
-        URLSchemeHandler.SharedHandler().register()
-    }
-
-    func applicationWillTerminate(_ aNotification: Notification) {
-        // Insert code here to tear down your application
-    }
-    
-    @IBAction func checkForUpdates(_ sender: AnyObject?) {
-        SUUpdater.shared().checkForUpdates(sender)
-    }
-    
-    @IBAction func showDownloadsWindow(_ sender: AnyObject?) {
-        if downloadListWindowController == nil {
-            downloadListWindowController = DownloadListWindowController()
-        }
-        
-        downloadListWindowController?.showWindow(self)
-    }
-    
-    @IBAction func showPreferencesWindow(_ sender: AnyObject?) {
-        if preferencesWindowController == nil {
-            preferencesWindowController = PreferencesWindowController()
-        }
-        
-        preferencesWindowController?.showWindow(self)
-    }
-    
-    // MARK: - Courtesy Dialogs
-    
-    fileprivate func showCourtesyDialogs() {
-        NotificationCenter.default.addObserver(self, selector: #selector(WWDCWeekDidStart), name: NSNotification.Name(rawValue: WWDCWeekDidStartNotification), object: nil)
-        
-        NewWWDCGreeter().presentAutomaticRefreshSuggestionIfAppropriate()
-    }
-    
-    @objc fileprivate func WWDCWeekDidStart() {
-        NewWWDCGreeter().presentAutomaticRefreshSuggestionIfAppropriate()
-    }
-    
-    // MARK: - About Panel
-    
-    fileprivate lazy var aboutWindowController: AboutWindowController = {
-        var aboutWC = AboutWindowController(infoText: About.sharedInstance.infoText)
-        
-        About.sharedInstance.infoTextChangedCallback = { newText in
-            self.aboutWindowController.infoText = newText
-        }
-        
-        return aboutWC
-    }()
-    
-    @IBAction func showAboutWindow(_ sender: AnyObject?) {
-        aboutWindowController.showWindow(sender)
-    }
-
 }
 
+extension AppDelegate: SUUpdaterDelegate {
+
+    func updaterMayCheck(forUpdates updater: SUUpdater) -> Bool {
+        #if DEBUG
+            return ProcessInfo.processInfo.arguments.contains("--enable-updates")
+        #else
+            return true
+        #endif
+    }
+}

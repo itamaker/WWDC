@@ -2,69 +2,68 @@
 //  MainWindowController.swift
 //  WWDC
 //
-//  Created by Guilherme Rambo on 18/04/15.
-//  Copyright (c) 2015 Guilherme Rambo. All rights reserved.
+//  Created by Guilherme Rambo on 19/04/17.
+//  Copyright © 2017 Guilherme Rambo. All rights reserved.
 //
 
 import Cocoa
+import PlayerUI
 
-class MainWindowController: NSWindowController {
-    
-    override func windowDidLoad() {
-        super.windowDidLoad()
-        
-        configureWindowAppearance()
-        
-        NotificationCenter.default.addObserver(forName: NSNotification.Name.NSWindowWillClose, object: window, queue: nil) { _ in
-            if let window = self.window {
-                Preferences.SharedPreferences().mainWindowFrame = window.frame
-            }
+enum MainWindowTab: Int {
+    #if FEATURED_TAB_ENABLED
+    case featured
+    #endif
+    case schedule
+    case videos
+
+    func stringValue() -> String {
+        var name = ""
+
+        debugPrint(self, separator: "", terminator: "", to: &name)
+
+        return name
+    }
+}
+
+extension Notification.Name {
+    static let MainWindowWantsToSelectSearchField = Notification.Name("MainWindowWantsToSelectSearchField")
+}
+
+final class MainWindowController: WWDCWindowController {
+
+    weak var activePlayerView: PUIPlayerView? {
+        didSet {
+            touchBar = nil
         }
     }
-    
-    override func showWindow(_ sender: Any?) {
-        restoreWindowSize()
-        
-        super.showWindow(sender)
+
+    static var defaultRect: NSRect {
+        return NSScreen.main?.visibleFrame.insetBy(dx: 50, dy: 120) ??
+               NSRect(x: 0, y: 0, width: 1200, height: 600)
     }
-    
-    fileprivate func configureWindowAppearance()
-    {
-        if let window = window {
-            if let view = window.contentView {
-                view.wantsLayer = true
-            }
-            
-            window.styleMask.insert(.fullSizeContentView)
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-        }
+    public var sidebarInitWidth: CGFloat?
+
+    override func loadWindow() {
+        let mask: NSWindow.StyleMask = [.titled, .resizable, .miniaturizable, .closable, .fullSizeContentView]
+        let window = WWDCWindow(contentRect: MainWindowController.defaultRect, styleMask: mask, backing: .buffered, defer: false)
+
+        window.title = "WWDC"
+
+        window.center()
+
+        window.identifier = NSUserInterfaceItemIdentifier(rawValue: "main")
+        window.setFrameAutosaveName(NSWindow.FrameAutosaveName(rawValue: "main"))
+        window.minSize = NSSize(width: 1060, height: 700)
+
+        self.window = window
     }
-    
-    fileprivate func restoreWindowSize()
-    {
-        if let window = window {
-            var savedFrame = Preferences.SharedPreferences().mainWindowFrame
-            
-            if savedFrame != NSZeroRect {
-                if let screen = NSScreen.main() {
-                    // if the screen's height changed between launches, the window can be too big
-                    if savedFrame.size.height > screen.frame.size.height {
-                        savedFrame.size.height = screen.frame.size.height
-                    }
-                }
-                
-                window.setFrame(savedFrame, display: true)
-            }
-        }
+
+    @IBAction func performFindPanelAction(_ sender: Any) {
+        NotificationCenter.default.post(name: .MainWindowWantsToSelectSearchField, object: nil)
     }
-    
-    @IBAction func toggleSidebar(_ sender: AnyObject) {
-        guard let splitController = window?.contentViewController as? NSSplitViewController, splitController.splitViewItems.count > 0 else { return }
-        
-        let sidebar = splitController.splitViewItems[0]
-        
-        sidebar.animator().isCollapsed = !sidebar.isCollapsed
+
+    override func makeTouchBar() -> NSTouchBar? {
+        return activePlayerView?.makeTouchBar()
     }
 
 }

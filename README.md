@@ -1,80 +1,91 @@
-If you want to support my open source projects financially, you can do so by purchasing a copy of [BrowserFreedom](https://getbrowserfreedom.com), [Mediunic](https://itunes.apple.com/app/mediunic-medium-client/id1088945121?mt=12) or sending Bitcoin to `3DH9B42m6k2A89hy1Diz3Vr3cpDNQTQCbJ` 😁
-
-**IMPORTANT: [Development of the next version is happening in the Version 5 branch, I will not accept pull requests to master until version5 is merged](https://github.com/insidegui/WWDC/tree/version5)**
-
 # The unofficial WWDC app for macOS
 
-This is the unofficial WWDC app for macOS.
+WWDC for macOS allows both attendees and non-attendees to access WWDC livestreams, videos and sessions during the conference and as a year-round resource.
 
-Use this app to watch WWDC sessions on your Mac and do much more. Keep reading...
+⬇️ If you just want to download the latest release, go to [the website](https://wwdc.io).
 
-**⬇️ [Click here to download the latest release](https://raw.githubusercontent.com/insidegui/WWDC/master/Releases/WWDC_latest.zip) ⬇️**
+## Schedule
 
-**Requires macOS 10.11 or later**
+The schedule tab shows the schedule for the most recent WWDC, and allows you to watch live streams for the Keynote and other sessions throughout the week.
 
-## Schedule, Live Streaming and Videos
+![schedule](./screenshots/v5/Schedule.png)
 
-The app shows the schedule for the current WWDC and videos for the past events.
+## Videos
 
-Please note that since this app is focused on videos, the schedule only shows sessions which will be live streamed, not labs and other events.
+Watch this year's videos as they're released and access videos from previous years. With [ASCIIWWDC](http://asciiwwdc.com) integration, you can also read transcripts of sessions and easily jump to a specific point in the relevant video.
 
-When sessions are live, a "live" indicator appears on the list and a "Watch Live" button becomes available:
+![videos](./screenshots/v5/Transcript.png)
 
-![Schedule Screenshot](screenshots/screenshot-schedule.png)
+### Video features
 
-## Controlling playback speed
+- Watch videos in 0.5x, 1x, 1.5x or 2x speeds
+- Fullscreen and native picture-in-picture support
+- Navigate video contents easily with the help of transcripts
 
-You can cycle through playback speeds by pressing `⌘⇧R` or by option-clicking on the skip forward arrows when the video is playing.
+## Chromecast
 
-## Searching
+You can watch WWDC videos (both live and on-demand) on your Chromecast. Just click the Chromecast button while playing a video, choose your device from the list and control playback using the Google Home app on your phone.
 
-The app has a powerful search feature. When you first launch the app, it indexes the videos database and downloads transcripts from ASCIIWWDC, so when you search, not only will you get search results from session titles and descriptions, but also from what the presenter said in the sessions.
+![chromecast](./screenshots/v5/ChromeCast.png)
 
-The app even shows a list of phrases matching your search so you can jump right to the point in the session where your searched word/phrase appears.
+## Bookmarks
 
-![Transcript Search](screenshots/transcriptsearch.png)
+Have you ever found yourself watching a WWDC session and wishing you could take notes at a specific point in the video to refer back to later on? This is now possible with bookmarks.
 
-With the handy filter bar you can filter sessions by year, track and focus, and also filter to show only favorited or downloaded sessions.
+With bookmarks, you can create a reference point within a video and add an annotation to it. Your bookmark annotations can also be considered while using the search, so it's easier than ever to find the content you've bookmarked before.
 
-![Transcript Search](screenshots/filterbar.png)
-	
+![bookmarks](./screenshots/v5/Video-Bookmark.png)
+
+## iCloud Sync
+
+With version 6.0, you can try out our new iCloud sync feature. Enable the feature in preferences and your favorites, bookmarks and progress in sessions will be synced accross all your Macs.
+
 ## Sharing
 
-You can share direct links to specific session videos. Just select the session on the list and ⌘C to copy it's URL, or use the right-click menu.
+You can easily share links to sessions or videos by using the share button. The links shared are for Apple's developer website, but the app can open these links if you drag them into the icon (or if you use [BrowserFreedom](https://getbrowserfreedom.com)).
 
-![rightmenushare](screenshots/rightmenushare.png)
+## Nerdy bits 🤓
 
-## Reading
+### Code of Conduct
+We expect all of our contributors to help uphold the values set out in our [code of conduct](./CODE_OF_CONDUCT.md). We fundamentally believe this will help us build a better community, and with it a better app.
 
-WWDC for macOS is integrated with [ASCIIWWDC](http://asciiwwdc.com), so you can see and search through transcripts of the sessions while watching the videos.
+### Contributing
 
-![screenshot2](screenshots/screenshot2.png)
+Please read the [contribution guidelines](CONTRIBUTING.md) before opening an issue or pull request.
 
-## Contributing
+### External libraries
 
-Please check out the [contribution guidelines](CONTRIBUTING.md) and [roadmap](ROADMAP.md) before contributing.
+A number of third-party libraries are used by the app:
 
-The app is currently implemented in Swift 3 (conversion done on December 2016). The architecture is not very nice, since I started working on this when I had just started to use Swift, it could be a lot more "swifty".
+- [Realm](https://realm.io): data storage and caching
+- [Sparkle](https://sparkle-project.org/): automatic updates
+- [CloudKitCodable](https://github.com/insidegui/CloudKitCodable): sync support
+- [Fabric](https://fabric.io): crash reporting and error logging
+- [Siesta](http://bustoutsolutions.github.io/siesta/): networking
+- [SwiftyJSON](https://github.com/SwiftyJSON/SwiftyJSON): JSON parsing (going away soon in favor of Codable)
+- [RxSwift](https://github.com/ReactiveX/RxSwift): reactive extensions
+- [RxRealm](https://github.com/RxSwiftCommunity/RxRealm): reactive extensions for Realm
 
-## Build Instructions
+### Internal libraries
 
-**Pre-requisites:**
+- **ConfCore** is the core of the app that deals with Apple's WWDC API, data storage, caching, syncing and transcripts (everything that has to do with data, basically)
+- **PlayerUI** contains the UI components for the video player and some general-purpose UI components used throughout the app
+- **ThrowBack** provides support for migration of user data and preferences from old versions of the app
 
-- macOS 10.12
-- Xcode 8.1
-- [CocoaPods](https://cocoapods.org)
+## Building the app
 
-Clone the repository:
+**Building requires Xcode 9.3 or later.**
 
-	$ git clone --recursive https://github.com/insidegui/WWDC.git
+Building the app requires [Carthage](https://github.com/Carthage/Carthage) to be installed.
 
-Install dependencies:
+**Clone this branch and before opening the project, run `./bootstrap.sh`** to fetch the dependencies (this script can take a while to run, that's normal).
 
-	$ pod install
+Since the app uses CloudKit, when you build it yourself, all of the CloudKit-dependant functionality will not be available. CloudKit requires a provisioning profile and a paid developer account.
 
-### Cask
+To build the app yourself without the need for a developer account and a CloudKit container, **always use the `WWDC` target when building**. The `WWDC with iCloud` target requires a paid developer account and a CloudKit container, which you won't be able to create because of the app's bundle identifier.
 
-You can also install using [Homebrew Cask](http://caskroom.io):
+![schedule](./screenshots/v5/BuildTarget.png)
 
-	$ brew cask install wwdc
+### Clearing app data during development
 
+If you need to clear the app's preferences and stored data during development, you can run `./cleardata.sh` in the project folder. **This will delete all of your preferences and data like favorites, bookmarks and progress in videos, so be careful**.
